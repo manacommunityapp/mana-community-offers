@@ -91,11 +91,64 @@ public class BusinessService {
     }
 
     @Transactional
+    public BusinessResponseDto submitKyc(String businessId, com.manacommunity.offers.dto.MerchantKycRequest req) {
+        BusinessEntity entity = businessRepository.findById(businessId)
+                .orElseThrow(() -> new IllegalArgumentException("Business not found: " + businessId));
+
+        if (req.getRegisteredEntityName() != null) {
+            entity.setRegisteredEntityName(req.getRegisteredEntityName());
+        }
+        entity.setGstin(req.getGstin());
+        entity.setBusinessRegistrationNumber(req.getBusinessRegistrationNumber());
+        entity.setKycDocumentUrl(req.getKycDocumentUrl());
+        entity.setBankAccountNumber(req.getBankAccountNumber());
+        entity.setBankIfscCode(req.getBankIfscCode());
+        entity.setBankAccountHolder(req.getBankAccountHolder());
+        entity.setBankName(req.getBankName());
+        entity.setVerificationStatus(BusinessVerificationStatus.PENDING);
+
+        BusinessEntity saved = businessRepository.save(entity);
+        log.info("Submitted KYC for business {}: GSTIN {}", businessId, req.getGstin());
+        return mapToDto(saved);
+    }
+
+    @Transactional
+    public BusinessResponseDto verifyMerchant(String businessId, com.manacommunity.offers.dto.VerifyMerchantRequest req) {
+        BusinessEntity entity = businessRepository.findById(businessId)
+                .orElseThrow(() -> new IllegalArgumentException("Business not found: " + businessId));
+
+        entity.setVerificationStatus(req.getStatus());
+        if (req.getPartnershipTier() != null) {
+            entity.setPartnershipTier(req.getPartnershipTier());
+        }
+        if (req.getCommissionRatePct() != null) {
+            entity.setCommissionRatePct(req.getCommissionRatePct());
+        }
+        entity.setVerifiedByUserId(req.getAdminUserId() != null ? req.getAdminUserId() : "admin");
+        entity.setVerifiedAt(LocalDateTime.now());
+        entity.setRejectionReason(req.getRejectionReason());
+
+        BusinessEntity updated = businessRepository.save(entity);
+        log.info("Merchant {} verification updated to {} by admin {}", businessId, req.getStatus(), req.getAdminUserId());
+        return mapToDto(updated);
+    }
+
+    @Transactional(readOnly = true)
+    public List<BusinessResponseDto> getPendingVerificationBusinesses() {
+        return businessRepository.findAll().stream()
+                .filter(b -> b.getVerificationStatus() == BusinessVerificationStatus.PENDING)
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
     public BusinessResponseDto updateVerificationStatus(String businessId, BusinessVerificationStatus status, String adminUserId) {
         BusinessEntity entity = businessRepository.findById(businessId)
                 .orElseThrow(() -> new IllegalArgumentException("Business not found: " + businessId));
 
         entity.setVerificationStatus(status);
+        entity.setVerifiedByUserId(adminUserId);
+        entity.setVerifiedAt(LocalDateTime.now());
         BusinessEntity updated = businessRepository.save(entity);
         log.info("Updated business {} status to {}", businessId, status);
         return mapToDto(updated);
@@ -141,6 +194,17 @@ public class BusinessService {
                 .activeDealsCount(entity.getActiveDealsCount())
                 .totalRedemptions(entity.getTotalRedemptions())
                 .ownerUserId(entity.getOwnerUserId())
+                .gstin(entity.getGstin())
+                .businessRegistrationNumber(entity.getBusinessRegistrationNumber())
+                .kycDocumentUrl(entity.getKycDocumentUrl())
+                .bankAccountNumber(entity.getBankAccountNumber())
+                .bankIfscCode(entity.getBankIfscCode())
+                .bankAccountHolder(entity.getBankAccountHolder())
+                .bankName(entity.getBankName())
+                .commissionRatePct(entity.getCommissionRatePct())
+                .verifiedByUserId(entity.getVerifiedByUserId())
+                .verifiedAt(entity.getVerifiedAt())
+                .rejectionReason(entity.getRejectionReason())
                 .createdAt(entity.getCreatedAt())
                 .build();
     }

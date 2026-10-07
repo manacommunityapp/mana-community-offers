@@ -33,6 +33,8 @@ public class CommunityOfferService {
     private final OfferClaimRepository claimRepository;
     private final BusinessRepository businessRepository;
     private final BusinessCategoryRepository categoryRepository;
+    private final CommissionSettlementService commissionSettlementService;
+    private final CouponService couponService;
 
     private static final String CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private final SecureRandom random = new SecureRandom();
@@ -64,6 +66,8 @@ public class CommunityOfferService {
     public OfferResponseDto getOfferById(String id) {
         CommunityOfferEntity entity = offerRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Offer not found: " + id));
+        entity.setViewCount((entity.getViewCount() != null ? entity.getViewCount() : 0) + 1);
+        offerRepository.save(entity);
         return mapToDto(entity);
     }
 
@@ -119,9 +123,12 @@ public class CommunityOfferService {
                 .validFrom(req.getValidFrom() != null ? req.getValidFrom() : LocalDate.now())
                 .validUntil(req.getValidUntil() != null ? req.getValidUntil() : LocalDate.now().plusDays(30))
                 .maxClaims(req.getMaxClaims() != null ? req.getMaxClaims() : 100)
+                .maxClaimsPerUser(req.getMaxClaimsPerUser() != null ? req.getMaxClaimsPerUser() : 1)
+                .minOrderAmount(req.getMinOrderAmount())
+                .commissionRateOverridePct(req.getCommissionRateOverridePct())
                 .claimedCount(0)
                 .redeemedCount(0)
-                .status(OfferStatus.PUBLISHED) // auto-publish for initial verified businesses or set PENDING
+                .status(OfferStatus.PUBLISHED)
                 .featured(Boolean.TRUE.equals(req.getFeatured()))
                 .viewCount(0)
                 .build();
@@ -129,7 +136,7 @@ public class CommunityOfferService {
         CommunityOfferEntity saved = offerRepository.save(entity);
 
         // Update active deals count on business
-        business.setActiveDealsCount(business.getActiveDealsCount() + 1);
+        business.setActiveDealsCount((business.getActiveDealsCount() != null ? business.getActiveDealsCount() : 0) + 1);
         businessRepository.save(business);
 
         log.info("Created community offer: {} for business {}", saved.getTitle(), business.getName());
@@ -154,14 +161,22 @@ public class CommunityOfferService {
             throw new IllegalStateException("Offer claim limit has been reached");
         }
 
-        // Check if resident already has an active claim for this offer
+        // Usage limit: Check per-user limit
+        int userLimit = offer.getMaxClaimsPerUser() != null ? offer.getMaxClaimsPerUser() : 1;
+        long currentClaims = claimRepository.countByOfferIdAndResidentUserId(offer.getId(), req.getResidentUserId());
+        if (currentClaims >= userLimit) {
+            throw new IllegalStateException("You have reached the maximum allowed claims (" + userLimit + ") for this offer");
+        }
+
+        // Check if resident already has an active voucher for this offer
         if (claimRepository.existsByOfferIdAndResidentUserIdAndStatus(offer.getId(), req.getResidentUserId(), ClaimStatus.ACTIVE)) {
             throw new IllegalStateException("You already have an active voucher for this offer");
         }
 
-        // Generate unique code
+        // Generate unique code & 4-digit backup PIN
         String redemptionCode = generateRedemptionCode();
-        String qrPayload = String.format("MANADEAL:%s:%s:%s", offer.getId(), req.getResidentUserId(), redemptionCode);
+        String counterPin = String.format("%04d", random.nextInt(10000));
+        String qrPayload = String.format("MANADEAL:%s:%s:%s:%s", offer.getId(), req.getResidentUserId(), redemptionCode, counterPin);
 
         BusinessEntity business = businessRepository.findById(offer.getBusinessId()).orElse(null);
 
@@ -173,6 +188,7 @@ public class CommunityOfferService {
                 .residentName(req.getResidentName())
                 .unitNumber(req.getUnitNumber())
                 .redemptionCode(redemptionCode)
+                .counterPin(counterPin)
                 .qrPayload(qrPayload)
                 .status(ClaimStatus.ACTIVE)
                 .validUntil(offer.getValidUntil())
@@ -181,7 +197,7 @@ public class CommunityOfferService {
         OfferClaimEntity savedClaim = claimRepository.save(claim);
 
         // Increment claim count
-        offer.setClaimedCount(offer.getClaimedCount() + 1);
+        offer.setClaimedCount((offer.getClaimedCount() != null ? offer.getClaimedCount() : 0) + 1);
         offerRepository.save(offer);
 
         log.info("Resident {} claimed offer {} with code {}", req.getResidentUserId(), offer.getTitle(), redemptionCode);
@@ -204,6 +220,7 @@ public class CommunityOfferService {
                 .residentName(req.getResidentName())
                 .unitNumber(req.getUnitNumber())
                 .redemptionCode(savedClaim.getRedemptionCode())
+                .counterPin(savedClaim.getCounterPin())
                 .qrPayload(savedClaim.getQrPayload())
                 .status(savedClaim.getStatus())
                 .validUntil(savedClaim.getValidUntil())
@@ -211,10 +228,68 @@ public class CommunityOfferService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    public QrVerificationResponse verifyQr(String codeOrQr) {
+        String code = extractRedemptionCode(codeOrQr);
+        OfferClaimEntity claim = claimRepository.findByRedemptionCode(code)
+                .orElse(null);
+
+        if (claim == null) {
+            return QrVerificationResponse.builder()
+                    .valid(false)
+                    .redemptionCode(code)
+                    .message("Invalid voucher code or QR payload")
+                    .build();
+        }
+
+        CommunityOfferEntity offer = offerRepository.findById(claim.getOfferId()).orElse(null);
+        BusinessEntity business = businessRepository.findById(claim.getBusinessId()).orElse(null);
+
+        boolean expired = claim.getStatus() == ClaimStatus.EXPIRED ||
+                (claim.getValidUntil() != null && claim.getValidUntil().isBefore(LocalDate.now()));
+        boolean redeemed = claim.getStatus() == ClaimStatus.REDEEMED;
+
+        String msg = "Voucher is valid and ready to redeem";
+        if (redeemed) {
+            msg = "Voucher was already redeemed on " + claim.getRedeemedAt();
+        } else if (expired) {
+            msg = "Voucher has expired on " + claim.getValidUntil();
+        }
+
+        return QrVerificationResponse.builder()
+                .valid(!redeemed && !expired && claim.getStatus() == ClaimStatus.ACTIVE)
+                .claimId(claim.getId())
+                .redemptionCode(claim.getRedemptionCode())
+                .counterPin(claim.getCounterPin())
+                .status(claim.getStatus())
+                .offerId(claim.getOfferId())
+                .offerTitle(offer != null ? offer.getTitle() : "Community Offer")
+                .businessId(claim.getBusinessId())
+                .businessName(business != null ? business.getName() : "")
+                .residentUserId(claim.getResidentUserId())
+                .residentName(claim.getResidentName())
+                .unitNumber(claim.getUnitNumber())
+                .dealType(offer != null ? offer.getDealType() : null)
+                .regularPrice(offer != null ? offer.getRegularPrice() : null)
+                .communityPrice(offer != null ? offer.getCommunityPrice() : null)
+                .savingsSummary(offer != null ? offer.getSavingsSummary() : "")
+                .validUntil(claim.getValidUntil())
+                .alreadyRedeemed(redeemed)
+                .isExpired(expired)
+                .message(msg)
+                .build();
+    }
+
     @Transactional
     public ClaimResponseDto redeemOffer(RedeemOfferRequest req) {
-        OfferClaimEntity claim = claimRepository.findByRedemptionCode(req.getRedemptionCode().trim().toUpperCase())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid redemption code: " + req.getRedemptionCode()));
+        String code = req.getRedemptionCode();
+        if (code == null || code.isBlank()) {
+            code = extractRedemptionCode(req.getQrPayload());
+        }
+
+        final String cleanCode = code.trim().toUpperCase();
+        OfferClaimEntity claim = claimRepository.findByRedemptionCode(cleanCode)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid redemption voucher code: " + cleanCode));
 
         if (claim.getStatus() == ClaimStatus.REDEEMED) {
             throw new IllegalStateException("Voucher has already been redeemed on " + claim.getRedeemedAt());
@@ -230,27 +305,39 @@ public class CommunityOfferService {
             throw new IllegalStateException("Voucher is not in active state");
         }
 
+        // Verify counter PIN if provided
+        if (req.getCounterPin() != null && !req.getCounterPin().isBlank()) {
+            if (claim.getCounterPin() != null && !claim.getCounterPin().equals(req.getCounterPin().trim())) {
+                throw new IllegalArgumentException("Invalid counter verification PIN");
+            }
+        }
+
         claim.setStatus(ClaimStatus.REDEEMED);
         claim.setRedeemedAt(LocalDateTime.now());
-        claim.setRedeemedByStaff(req.getStaffName());
+        claim.setRedeemedByStaff(req.getStaffName() != null ? req.getStaffName() : "Store Staff");
         claim.setRedemptionNotes(req.getNotes());
+
+        // Commission calculation and record creation
+        commissionSettlementService.recordRedemptionCommission(claim, req.getBillAmount());
+
         OfferClaimEntity savedClaim = claimRepository.save(claim);
 
         // Update counts on offer & business
         offerRepository.findById(claim.getOfferId()).ifPresent(o -> {
-            o.setRedeemedCount(o.getRedeemedCount() + 1);
+            o.setRedeemedCount((o.getRedeemedCount() != null ? o.getRedeemedCount() : 0) + 1);
             offerRepository.save(o);
         });
 
         businessRepository.findById(claim.getBusinessId()).ifPresent(b -> {
-            b.setTotalRedemptions(b.getTotalRedemptions() + 1);
+            b.setTotalRedemptions((b.getTotalRedemptions() != null ? b.getTotalRedemptions() : 0) + 1);
             businessRepository.save(b);
         });
 
         CommunityOfferEntity offer = offerRepository.findById(claim.getOfferId()).orElse(null);
         BusinessEntity business = businessRepository.findById(claim.getBusinessId()).orElse(null);
 
-        log.info("Redeemed voucher {} by business staff {}", claim.getRedemptionCode(), req.getStaffName());
+        log.info("Redeemed voucher {} by business staff {}, recorded commission ₹{}",
+                claim.getRedemptionCode(), req.getStaffName(), claim.getCommissionAmount());
 
         return ClaimResponseDto.builder()
                 .id(savedClaim.getId())
@@ -263,16 +350,22 @@ public class CommunityOfferService {
                 .businessId(claim.getBusinessId())
                 .businessName(business != null ? business.getName() : "")
                 .businessLogoUrl(business != null ? business.getLogoUrl() : "")
+                .businessAddress(business != null ? business.getAddress() : "")
+                .businessPhone(business != null ? business.getPhone() : "")
                 .communityId(claim.getCommunityId())
                 .residentUserId(claim.getResidentUserId())
                 .residentName(claim.getResidentName())
                 .unitNumber(claim.getUnitNumber())
                 .redemptionCode(savedClaim.getRedemptionCode())
+                .counterPin(savedClaim.getCounterPin())
                 .qrPayload(savedClaim.getQrPayload())
                 .status(savedClaim.getStatus())
                 .validUntil(savedClaim.getValidUntil())
                 .claimedAt(savedClaim.getClaimedAt())
                 .redeemedAt(savedClaim.getRedeemedAt())
+                .billAmount(savedClaim.getBillAmount())
+                .discountAmount(savedClaim.getDiscountAmount())
+                .commissionAmount(savedClaim.getCommissionAmount())
                 .build();
     }
 
@@ -300,14 +393,92 @@ public class CommunityOfferService {
                             .residentName(c.getResidentName())
                             .unitNumber(c.getUnitNumber())
                             .redemptionCode(c.getRedemptionCode())
+                            .counterPin(c.getCounterPin())
                             .qrPayload(c.getQrPayload())
                             .status(c.getStatus())
                             .validUntil(c.getValidUntil())
                             .claimedAt(c.getClaimedAt())
                             .redeemedAt(c.getRedeemedAt())
+                            .billAmount(c.getBillAmount())
+                            .discountAmount(c.getDiscountAmount())
+                            .commissionAmount(c.getCommissionAmount())
                             .build();
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public CampaignAnalyticsDto getCampaignAnalytics(String offerId) {
+        CommunityOfferEntity offer = offerRepository.findById(offerId)
+                .orElseThrow(() -> new IllegalArgumentException("Offer not found: " + offerId));
+
+        int views = offer.getViewCount() != null ? offer.getViewCount() : 0;
+        int claimed = offer.getClaimedCount() != null ? offer.getClaimedCount() : 0;
+        int redeemed = offer.getRedeemedCount() != null ? offer.getRedeemedCount() : 0;
+        int max = offer.getMaxClaims() != null ? offer.getMaxClaims() : 100;
+        int available = Math.max(0, max - claimed);
+
+        double claimRate = views > 0 ? (double) claimed / views * 100.0 : 0.0;
+        double redemptionRate = claimed > 0 ? (double) redeemed / claimed * 100.0 : 0.0;
+
+        double unitDiscount = 0.0;
+        double unitPrice = offer.getCommunityPrice() != null ? offer.getCommunityPrice() : 0.0;
+        if (offer.getRegularPrice() != null && offer.getCommunityPrice() != null) {
+            unitDiscount = Math.max(0.0, offer.getRegularPrice() - offer.getCommunityPrice());
+        }
+
+        double totalDiscount = unitDiscount * redeemed;
+        double totalSales = unitPrice * redeemed;
+
+        double commissionRate = offer.getCommissionRateOverridePct() != null ? offer.getCommissionRateOverridePct() : 5.0;
+        double commEarned = totalSales * (commissionRate / 100.0);
+
+        return CampaignAnalyticsDto.builder()
+                .offerId(offer.getId())
+                .offerTitle(offer.getTitle())
+                .businessId(offer.getBusinessId())
+                .businessName(offer.getBusinessName())
+                .categoryName(offer.getCategoryName())
+                .viewCount(views)
+                .claimedCount(claimed)
+                .redeemedCount(redeemed)
+                .availableClaims(available)
+                .claimRatePct(Math.round(claimRate * 10.0) / 10.0)
+                .redemptionRatePct(Math.round(redemptionRate * 10.0) / 10.0)
+                .totalGmvDiscounted(Math.round(totalDiscount * 100.0) / 100.0)
+                .totalSalesGmv(Math.round(totalSales * 100.0) / 100.0)
+                .platformCommissionEarned(Math.round(commEarned * 100.0) / 100.0)
+                .validFrom(offer.getValidFrom())
+                .validUntil(offer.getValidUntil())
+                .active(offer.getStatus() == OfferStatus.PUBLISHED && (offer.getValidUntil() == null || !offer.getValidUntil().isBefore(LocalDate.now())))
+                .build();
+    }
+
+    @Transactional
+    public int expireOutdatedRecords() {
+        LocalDate today = LocalDate.now();
+
+        // Expire offers
+        List<CommunityOfferEntity> expiredOffers = offerRepository.findByStatusAndValidUntilBefore(OfferStatus.PUBLISHED, today);
+        for (CommunityOfferEntity o : expiredOffers) {
+            o.setStatus(OfferStatus.EXPIRED);
+        }
+        offerRepository.saveAll(expiredOffers);
+
+        // Expire active claims
+        List<OfferClaimEntity> expiredClaims = claimRepository.findByStatusAndValidUntilBefore(ClaimStatus.ACTIVE, today);
+        for (OfferClaimEntity c : expiredClaims) {
+            c.setStatus(ClaimStatus.EXPIRED);
+        }
+        claimRepository.saveAll(expiredClaims);
+
+        // Expire coupons
+        int expiredCoupons = couponService.expireOutdatedCoupons();
+
+        int totalExpired = expiredOffers.size() + expiredClaims.size() + expiredCoupons;
+        log.info("Maintenance sweep: expired {} offers, {} claims, and {} coupons",
+                expiredOffers.size(), expiredClaims.size(), expiredCoupons);
+        return totalExpired;
     }
 
     @Transactional
@@ -320,6 +491,20 @@ public class CommunityOfferService {
         offer.setRejectionReason(rejectionReason);
         CommunityOfferEntity updated = offerRepository.save(offer);
         return mapToDto(updated);
+    }
+
+    private String extractRedemptionCode(String input) {
+        if (input == null || input.isBlank()) {
+            throw new IllegalArgumentException("Redemption code or QR payload cannot be blank");
+        }
+        String clean = input.trim().toUpperCase();
+        if (clean.startsWith("MANADEAL:")) {
+            String[] parts = clean.split(":");
+            if (parts.length >= 4) {
+                return parts[3]; // format: MANADEAL:offerId:userId:code:pin
+            }
+        }
+        return clean;
     }
 
     private String generateRedemptionCode() {
@@ -367,6 +552,9 @@ public class CommunityOfferService {
                 .validFrom(entity.getValidFrom())
                 .validUntil(entity.getValidUntil())
                 .maxClaims(max)
+                .maxClaimsPerUser(entity.getMaxClaimsPerUser())
+                .minOrderAmount(entity.getMinOrderAmount())
+                .commissionRateOverridePct(entity.getCommissionRateOverridePct())
                 .claimedCount(claimed)
                 .redeemedCount(entity.getRedeemedCount() != null ? entity.getRedeemedCount() : 0)
                 .availableClaims(available)

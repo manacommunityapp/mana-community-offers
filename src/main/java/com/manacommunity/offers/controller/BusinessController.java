@@ -18,6 +18,7 @@ import java.util.List;
 public class BusinessController {
 
     private final BusinessService businessService;
+    private final com.manacommunity.offers.service.CommerceAnalyticsService analyticsService;
 
     @GetMapping
     public ResponseEntity<List<BusinessResponseDto>> getAllBusinesses(
@@ -40,5 +41,18 @@ public class BusinessController {
     @PostMapping
     public ResponseEntity<BusinessResponseDto> registerBusiness(@Valid @RequestBody RegisterBusinessRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED).body(businessService.registerBusiness(req));
+    }
+
+    @PostMapping("/{id}/kyc")
+    public ResponseEntity<BusinessResponseDto> submitKyc(
+            @PathVariable String id,
+            @Valid @RequestBody com.manacommunity.offers.dto.MerchantKycRequest req) {
+        return ResponseEntity.ok(businessService.submitKyc(id, req));
+    }
+
+    @GetMapping("/{id}/campaign-analytics")
+    public ResponseEntity<List<com.manacommunity.offers.dto.CampaignAnalyticsDto>> getBusinessCampaignAnalytics(
+            @PathVariable String id) {
+        return ResponseEntity.ok(analyticsService.getBusinessCampaignAnalytics(id));
     }
 }

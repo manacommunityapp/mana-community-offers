@@ -37,5 +37,16 @@ public class BusinessResponseDto {
     private Integer activeDealsCount;
     private Integer totalRedemptions;
     private String ownerUserId;
+    private String gstin;
+    private String businessRegistrationNumber;
+    private String kycDocumentUrl;
+    private String bankAccountNumber;
+    private String bankIfscCode;
+    private String bankAccountHolder;
+    private String bankName;
+    private Double commissionRatePct;
+    private String verifiedByUserId;
+    private LocalDateTime verifiedAt;
+    private String rejectionReason;
     private LocalDateTime createdAt;
 }

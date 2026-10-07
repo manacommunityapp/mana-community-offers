@@ -50,6 +50,9 @@ public class OfferClaimEntity {
     @Column(length = 500)
     private String qrPayload;
 
+    @Column(length = 6)
+    private String counterPin; // 4-digit backup PIN
+
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private ClaimStatus status = ClaimStatus.ACTIVE;
@@ -57,6 +60,15 @@ public class OfferClaimEntity {
     private LocalDate validUntil;
 
     private LocalDateTime redeemedAt;
+
+    private Double billAmount;
+
+    private Double discountAmount;
+
+    private Double commissionAmount;
+
+    @Column(length = 100)
+    private String commissionRecordId;
 
     @Column(length = 100)
     private String redeemedByStaff;

@@ -91,6 +91,38 @@ public class BusinessEntity {
     @Builder.Default
     private Integer totalRedemptions = 0;
 
+    @Column(length = 20)
+    private String gstin;
+
+    @Column(length = 50)
+    private String businessRegistrationNumber;
+
+    @Column(length = 500)
+    private String kycDocumentUrl;
+
+    @Column(length = 50)
+    private String bankAccountNumber;
+
+    @Column(length = 20)
+    private String bankIfscCode;
+
+    @Column(length = 150)
+    private String bankAccountHolder;
+
+    @Column(length = 100)
+    private String bankName;
+
+    @Builder.Default
+    private Double commissionRatePct = 5.0;
+
+    @Column(length = 100)
+    private String verifiedByUserId;
+
+    private LocalDateTime verifiedAt;
+
+    @Column(length = 255)
+    private String rejectionReason;
+
     @Column(length = 100)
     private String ownerUserId;
 

@@ -26,4 +26,8 @@ public interface OfferClaimRepository extends JpaRepository<OfferClaimEntity, St
     long countByOfferIdAndStatus(String offerId, ClaimStatus status);
 
     long countByBusinessIdAndStatus(String businessId, ClaimStatus status);
+
+    long countByOfferIdAndResidentUserId(String offerId, String residentUserId);
+
+    List<OfferClaimEntity> findByStatusAndValidUntilBefore(ClaimStatus status, java.time.LocalDate date);
 }

@@ -16,7 +16,7 @@ import java.util.Optional;
 @Repository
 public interface CommunityOfferRepository extends JpaRepository<CommunityOfferEntity, String> {
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("SELECT o FROM CommunityOfferEntity o WHERE o.id = :id")
     Optional<CommunityOfferEntity> findByIdWithPessimisticLock(@Param("id") String id);
 
@@ -42,4 +42,6 @@ public interface CommunityOfferRepository extends JpaRepository<CommunityOfferEn
     List<CommunityOfferEntity> searchOffersForCommunity(@Param("communityId") String communityId,
                                                         @Param("today") LocalDate today,
                                                         @Param("query") String query);
+
+    List<CommunityOfferEntity> findByStatusAndValidUntilBefore(OfferStatus status, LocalDate today);
 }

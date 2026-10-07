@@ -26,6 +26,7 @@ public class CommerceDataInitializer implements CommandLineRunner {
     private final CommunityDemandRepository demandRepository;
     private final CommunityDemandInterestRepository interestRepository;
     private final MarketEventService marketEventService;
+    private final CouponRepository couponRepository;
 
     @Override
     public void run(String... args) {
@@ -580,6 +581,43 @@ public class CommerceDataInitializer implements CommandLineRunner {
                 .residentUserId("user-vikram")
                 .residentName("Vikram Mehta")
                 .flatNumber("C-104")
+                .build());
+
+        // 7. Seed starter community coupons
+        couponRepository.save(CouponEntity.builder()
+                .code("MANA20")
+                .title("20% Off Welcome Community Voucher")
+                .description("Special 20% discount on any partner store for Mana Residency residents")
+                .communityId("comm-mana-residency")
+                .discountType(CouponDiscountType.PERCENTAGE)
+                .discountValue(20.0)
+                .minOrderAmount(300.0)
+                .maxDiscountAmount(150.0)
+                .validFrom(LocalDate.now())
+                .validUntil(LocalDate.now().plusDays(60))
+                .usageLimitTotal(500)
+                .usageLimitPerUser(2)
+                .totalUsedCount(14)
+                .status(CouponStatus.ACTIVE)
+                .active(true)
+                .build());
+
+        couponRepository.save(CouponEntity.builder()
+                .code("FESTIVE100")
+                .title("Flat ₹100 Off Festive Offer")
+                .description("Flat ₹100 instant discount on orders above ₹500 at verified local merchants")
+                .communityId("comm-mana-residency")
+                .discountType(CouponDiscountType.FLAT_AMOUNT)
+                .discountValue(100.0)
+                .minOrderAmount(500.0)
+                .maxDiscountAmount(100.0)
+                .validFrom(LocalDate.now())
+                .validUntil(LocalDate.now().plusDays(45))
+                .usageLimitTotal(200)
+                .usageLimitPerUser(1)
+                .totalUsedCount(28)
+                .status(CouponStatus.ACTIVE)
+                .active(true)
                 .build());
 
         log.info("Mana Deals & Community Commerce Network starter data seeded successfully.");

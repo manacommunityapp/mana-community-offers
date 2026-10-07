@@ -49,8 +49,23 @@ public class CommunityOfferController {
     }
 
     @PostMapping("/redeem")
-    public ResponseEntity<ClaimResponseDto> redeemOffer(@Valid @RequestBody RedeemOfferRequest req) {
+    public ResponseEntity<ClaimResponseDto> redeemOffer(@RequestBody RedeemOfferRequest req) {
         return ResponseEntity.ok(offerService.redeemOffer(req));
+    }
+
+    @PostMapping("/qr/verify")
+    public ResponseEntity<QrVerificationResponse> verifyQr(@RequestParam(required = false) String code,
+                                                          @RequestBody(required = false) RedeemOfferRequest req) {
+        String token = code;
+        if ((token == null || token.isBlank()) && req != null) {
+            token = req.getQrPayload() != null && !req.getQrPayload().isBlank() ? req.getQrPayload() : req.getRedemptionCode();
+        }
+        return ResponseEntity.ok(offerService.verifyQr(token));
+    }
+
+    @GetMapping("/{id}/analytics")
+    public ResponseEntity<CampaignAnalyticsDto> getDealAnalytics(@PathVariable String id) {
+        return ResponseEntity.ok(offerService.getCampaignAnalytics(id));
     }
 
     @GetMapping("/my-claims")

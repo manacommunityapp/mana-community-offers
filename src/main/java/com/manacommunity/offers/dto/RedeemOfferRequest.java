@@ -10,12 +10,13 @@ import lombok.*;
 @Builder
 public class RedeemOfferRequest {
 
-    @NotBlank(message = "Redemption code is required")
-    private String redemptionCode; // e.g. "MANA-8F29K"
+    private String redemptionCode; // e.g. "MANA-8F29K" (or extracted from qrPayload)
+    private String qrPayload; // Scanned QR string
+    private String counterPin; // 4-digit backup PIN
 
-    @NotBlank(message = "Business ID is required")
     private String businessId;
 
+    private Double billAmount; // Gross invoice amount for commission calculation
     private String staffName;
     private String notes;
 }

@@ -32,8 +32,12 @@ public class ClaimResponseDto {
     private String unitNumber;
     private String redemptionCode; // e.g. "MANA-8F29K"
     private String qrPayload;
+    private String counterPin;
     private ClaimStatus status;
     private LocalDate validUntil;
     private LocalDateTime claimedAt;
     private LocalDateTime redeemedAt;
+    private Double billAmount;
+    private Double discountAmount;
+    private Double commissionAmount;
 }

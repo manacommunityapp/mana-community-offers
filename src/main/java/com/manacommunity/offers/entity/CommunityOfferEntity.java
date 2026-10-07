@@ -90,6 +90,13 @@ public class CommunityOfferEntity {
     private Integer maxClaims = 100;
 
     @Builder.Default
+    private Integer maxClaimsPerUser = 1;
+
+    private Double minOrderAmount;
+
+    private Double commissionRateOverridePct;
+
+    @Builder.Default
     private Integer claimedCount = 0;
 
     @Builder.Default

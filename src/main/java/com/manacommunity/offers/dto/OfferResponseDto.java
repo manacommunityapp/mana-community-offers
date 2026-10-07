@@ -38,6 +38,9 @@ public class OfferResponseDto {
     private LocalDate validFrom;
     private LocalDate validUntil;
     private Integer maxClaims;
+    private Integer maxClaimsPerUser;
+    private Double minOrderAmount;
+    private Double commissionRateOverridePct;
     private Integer claimedCount;
     private Integer redeemedCount;
     private Integer availableClaims;

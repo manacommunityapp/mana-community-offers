@@ -18,6 +18,9 @@ public class CommerceAnalyticsDto {
     private Long totalRedemptions;
     private Double redemptionRate;
     private Double totalEstimatedSavings;
+    private Double totalCommissionsEarned;
+    private Double totalSettledPayouts;
+    private Double totalPendingPayouts;
     private Map<String, Long> categoryDistribution;
     private Map<String, Long> dealTypeDistribution;
 }

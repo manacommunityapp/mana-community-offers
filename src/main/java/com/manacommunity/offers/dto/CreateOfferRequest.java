@@ -45,5 +45,8 @@ public class CreateOfferRequest {
     private LocalDate validFrom;
     private LocalDate validUntil;
     private Integer maxClaims;
+    private Integer maxClaimsPerUser;
+    private Double minOrderAmount;
+    private Double commissionRateOverridePct;
     private Boolean featured;
 }
